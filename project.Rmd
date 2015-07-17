@@ -1,0 +1,155 @@
+#Coursera Practical Machine Learning - Course Assignment
+### Philip Ohlsson
+#### July 16, 2015
+
+
+##Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+
+Participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions:
+
+- Class A: exactly according to the specification,
+- Class B: throwing the elbows to the front, 
+- Class C: lifting the dumbbell only halfway, 
+- Class D: lowering the dumbbell only halfway, 
+- Class E: throwing the hips to the front. 
+
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. 
+
+###Data
+
+The training data for this project are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+###Goal
+The goal of this project is to predict the manner in which the participants did the exercise. This is the "classe" variable in the training set. We may use any of the other variables to predict with. A report will be created to describe how the model is built, how cross validation is used, the thoughts of the expected out of sample error, and how the choices were made. The prediction model will be used to predict 20 different test cases. 
+
+##Getting and cleaning data
+Download the data, if necessary, and load the data and the packages into R: 
+
+```{r, warning = FALSE, message = FALSE, echo = TRUE}
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+knitr::opts_chunk$set(cache=TRUE)
+
+if (!file.exists("pml-training.csv" )){
+        fileUrl = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+        download.file(fileUrl, destfile="./pml-training.csv", method = "curl")
+}
+
+if (!file.exists("pml-testing.csv" )){
+        fileUrl = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+        download.file(fileUrl, destfile="./pml-testing.csv", method = "curl")
+}
+
+#Read in the data: 
+trainingData <- read.csv("pml-training.csv", header = TRUE, sep = ",", na.strings = c("NA", ""))
+testingData <- read.csv("pml-testing.csv", header = TRUE, sep = ",", na.strings = c("NA", ""))
+```
+
+First check the data: 
+```{r}
+str(trainingData)
+```
+
+From first view it seems that there are a lot of variables containing NA's and missing values. Let's remove these from the training data:
+```{r}
+NATraining <- sapply(trainingData, function(x) {sum(is.na(x))})
+trainingData <- trainingData[,which(NATraining == 0)]
+
+NATesting <- sapply(testingData, function(x) {sum(is.na(x))})
+testingData <- testingData[, which(NATesting == 0)]
+
+dim(trainingData)
+```
+
+The variables have now been reduced from 160 to 60 in the data set. Let's check which variables have near zero variance and remove them from the data:
+
+```{r}
+nzv <- nearZeroVar(trainingData, saveMetrics = TRUE)
+trainingData <- trainingData[,nzv$nzv == "FALSE"]
+
+nzv <- nearZeroVar(testingData, saveMetrics = TRUE)
+testingData <- testingData[, nzv$nzv == "FALSE"]
+
+dim(trainingData)
+```
+
+Finally, remove the first 6 variables, as they have nothing to do with making the predictions: 
+```{r}
+trainingData <- trainingData[,-c(1:6)]
+testingData <- testingData[, -c(1:6)]
+dim(trainingData)
+```
+
+##Cross-validation
+The training data set is split into two parts: 70% of the data will be used for training the model and 30% for checking the prediction performance of the model:
+```{r}
+set.seed(12345)
+inTrain <- createDataPartition(trainingData$classe, p = 0.7, list = FALSE)
+training <- trainingData[inTrain,]
+testing <- trainingData[-inTrain,]
+```
+
+##Building the model - Random Forest
+The method used for building the model will be Random Forest. The reason for this is that Random Forest is very accurate among other algorithms and it runs very efficiently on large data sets. We will run the set on 5-fold cross validation. In 5-fold cross-validation, the original sample is randomly partitioned into 5 equal sized subsamples. Of the 5 subsamples, a single subsample is retained as the validation data for testing the model, and the remaining 4 subsamples are used as training data. The cross-validation process is then repeated 5 times (the folds), with each of the 5 subsamples used exactly once as the validation data. The 5 results from the folds can then be averaged (or otherwise combined) to produce a single estimation. 
+
+```{r}
+set.seed(12345)
+rfModel <- train(classe ~., method = "rf", data = training, 
+                 trControl = trainControl(method = "cv", number = 5), 
+                 prox = TRUE, allowParallel = TRUE)
+
+rfModel
+```
+
+##Check performance of model
+The model will be tested on the validation data (partition of the training data) and a confusion matrix will be used to check the accuracy of the prediction on the validation data:
+
+```{r}
+predictTesting <- predict(rfModel, testing)
+confusionMatrix(testing$classe, predictTesting)
+
+#Accuracy: 
+accuracy <- confusionMatrix(testing$classe, predictTesting)$overall[1]
+
+#Out of sample error:
+OOSError <- 1 - confusionMatrix(testing$classe, predictTesting)$overall[1]
+
+cat("Accuracy: ", accuracy)
+cat("Out of sample error: ", OOSError)
+
+```
+
+The accuracy from the prediction model is 98.90% and the out of sample error is 1.10%. As this is a very accurate result, we will run the Random Forest model on the test data.
+
+##Run the model on the test data
+The Random Forest model is now applied to the test data to predict the outcome:
+```{r}
+answer <- predict(rfModel, testingData)
+
+answer
+```
+
+
+##Appendix
+###Random Forest decision tree
+```{r}
+rfModelTree <- rpart(classe ~., data = training, method = "class")
+prp(rfModelTree)
+```
+
+###Plot of the top 20 variables impact on outcome
+```{r}
+plot(varImp(rfModel), top = 20)
+```
